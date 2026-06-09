@@ -17,50 +17,22 @@ The pattern below uses AES-256-GCM authenticated encryption + PBKDF2 key derivat
 
 ---
 
-## Crypto choices
+## Crypto choices (general)
 
-| Concern                | Choice                              | Why                                        |
-|------------------------|-------------------------------------|--------------------------------------------|
-| Symmetric cipher       | **AES-256-GCM**                     | Authenticated, fast, hardware-accelerated  |
-| Key derivation         | **PBKDF2-SHA-256, 100K iterations** | Standard, slow enough to resist brute      |
-| Salt                   | 16 random bytes per ciphertext      | Defeats rainbow tables                     |
-| IV / nonce             | 12 random bytes per ciphertext      | GCM requirement, never reuse               |
-| Auth tag               | 16 bytes (GCM default)              | Detects tampering                          |
+For symmetric-key encryption at rest, AES-256-GCM is the standard choice — authenticated, hardware-accelerated, and broadly supported. Pair it with a memory-hard or slow KDF (Argon2id is best of breed; PBKDF2 is acceptable if iteration count is current with OWASP guidance). Always use a fresh random salt and a fresh random nonce per ciphertext; never reuse a nonce under the same key.
 
-```ts
-// pseudo-code shape
-import { createCipheriv, randomBytes, pbkdf2Sync } from 'crypto';
+The exact serialization format (how you encode salt/IV/tag/ciphertext) is an implementation detail, but the rules are universal:
 
-function encrypt(plaintext: string, password: string): string {
-  const salt = randomBytes(16);
-  const iv = randomBytes(12);
-  const key = pbkdf2Sync(password, salt, 100_000, 32, 'sha256');
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return [salt, iv, tag, encrypted].map(b => b.toString('base64')).join(':');
-}
-```
-
-`decrypt()` reverses, including `decipher.setAuthTag(tag)` so tampered ciphertexts throw on `final()`.
+- Salt must be random per encryption operation
+- Nonce/IV must be random per encryption operation (reuse breaks GCM completely)
+- Auth tag must be verified on decrypt — tampered ciphertexts should throw
+- Iteration count for the KDF must keep pace with hardware — what was strong in 2020 is weak in 2026
 
 ---
 
-## Storage layout
+## Storage layout (conceptual)
 
-For a fleet of N wallets, store each as:
-
-```json
-{
-  "id": "uuid-here",
-  "publicKey": "GxK...",       // safe to log / index
-  "encryptedSecret": "...",    // AES-GCM ciphertext of base58 secret
-  "createdAt": "2026-06-09T00:00:00Z",
-  "role": "BUNDLE | FOLLOW | TRADE | MAIN"
-}
-```
-
-Public keys can live in a regular DB index. Encrypted secrets ride alongside but are never logged, never sent to the frontend, never copied to backups un-encrypted.
+Separate the public-safe metadata (pubkey, id, timestamps, optional role tag) from the encrypted secret material. The metadata can live in a regular DB index. The encrypted secrets ride alongside but are never logged, never sent to the frontend, never copied to backups un-encrypted.
 
 ---
 
@@ -76,7 +48,7 @@ Public keys can live in a regular DB index. Encrypted secrets ride alongside but
 
 ## Footguns
 
-- **PBKDF2 100K iterations** is the *minimum*. For higher security needs, bump to 600K (OWASP 2026 recommendation) or migrate to Argon2id.
+- **PBKDF2 iteration counts must keep pace with hardware**. Check the current OWASP recommendation; what was strong years ago is weak now. For higher-security applications, prefer Argon2id.
 - **GCM nonce reuse is catastrophic** — if you reuse a nonce for the same key, GCM is broken. Always re-randomize.
 - **Don't roll your own crypto** — use the Node `crypto` module or `@noble/ciphers`, not custom XOR + SHA.
 - **Backup the encrypted blob safely** — losing the encrypted DB AND the master password = losing all funds. Plan for one or the other being recoverable.
