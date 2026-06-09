@@ -56,7 +56,7 @@ For a fleet of N wallets, store each as:
   "publicKey": "GxK...",       // safe to log / index
   "encryptedSecret": "...",    // AES-GCM ciphertext of base58 secret
   "createdAt": "2026-06-09T00:00:00Z",
-  "role": "BUNDLE | SNIPER | TRADE | MAIN"
+  "role": "BUNDLE | FOLLOW | TRADE | MAIN"
 }
 ```
 
